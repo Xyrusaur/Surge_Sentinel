@@ -21,7 +21,7 @@ with open('data.csv', 'a') as csvfile:
 
   # Write headers if the file is empty
     if empty_file:
-      csvfile.write("Time,Pressure,Depth\n")
+      csvfile.write("Date_Time,Water_Pressure,Depth\n")
 
     # Read data from serial monitor in a loop
     while True:
@@ -40,7 +40,7 @@ with open('data.csv', 'a') as csvfile:
 
             # Write data to CSV file
             csvfile.write(f"{csv_string}\n")
-            csvfile.flush()  # Force data write to disk
+            csvfile.flush() # Force data write to disk
 
             data = pd.read_csv('data.csv', encoding='utf-8', skipinitialspace=True, delimiter=',', quoting=csv.QUOTE_NONE)
 
