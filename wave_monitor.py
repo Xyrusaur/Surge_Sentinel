@@ -1,8 +1,8 @@
 import serial
 import csv
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime
+# import matplotlib.pyplot as plt
 
 # Serial port configuration
 port = 'COM3'  # Replace with your actual serial port
@@ -21,7 +21,7 @@ with open('data.csv', 'a') as csvfile:
 
   # Write headers if the file is empty
     if empty_file:
-      csvfile.write("Date_Time,Water_Pressure,Depth\n")
+      csvfile.write("Date_Time,Water_Pressure,Water_Depth\n")
 
     # Read data from serial monitor in a loop
     while True:
