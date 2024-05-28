@@ -1,7 +1,9 @@
 import serial
+from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from datetime import datetime
+import csv
+import os
 
 # Serial port configuration
 serial_port = 'COM3'  # Replace with your serial port
@@ -22,9 +24,15 @@ def read_serial_data(ser):
             line = ser.readline().decode('utf-8').strip()
             data = line.split(',')
             if len(data) == 2:  # Assuming data format is "pressure,water depth"
-                timestamp = datetime.now()  # Get current timestamp
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]  # Get current timestamp up to two milliseconds
                 pressure = float(data[0])
                 depth = float(data[1])
+                
+                # Write data to CSV file
+                with open('data.csv', mode='a', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow([timestamp, pressure, depth])
+                
                 return timestamp, pressure, depth
         except Exception as e:
             print(f"Error reading from serial port: {e}")
@@ -48,7 +56,7 @@ def animate(i):
         ax1.clear()
         ax1.plot(xs_pressure, ys_pressure)
         ax1.set_title('Water Pressure Over Time')
-        ax1.set_ylabel('Pressure (Pa)')
+        ax1.set_ylabel('Pressure (hPa)')
 
         ax2.clear()
         ax2.plot(xs_depth, ys_depth)
@@ -56,7 +64,9 @@ def animate(i):
         ax2.set_ylabel('Depth (cm)')
         ax2.set_xlabel('Time')
 
-        plt.xticks(rotation=45, ha='right')
+        # Rotate x-axis ticks for both plots
+        ax1.tick_params(axis='x', rotation=45)
+        ax2.tick_params(axis='x', rotation=45)
 
 def main():
     global ser
@@ -65,8 +75,14 @@ def main():
         ser = serial.Serial(serial_port, baud_rate, timeout=1)
         # time.sleep(2)  # No longer needed
 
+        # Check if the CSV file exists, if not, create it with headers
+        if not os.path.exists('data.csv'):
+            with open('data.csv', mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(['Timestamp', 'Pressure (hPa)', 'Depth (cm)'])
+
         # Start the animation
-        ani = animation.FuncAnimation(fig, animate, interval=1000)
+        ani = animation.FuncAnimation(fig, animate, interval=250)
         plt.show()
 
     except Exception as e:
