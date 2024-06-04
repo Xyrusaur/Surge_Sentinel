@@ -1,6 +1,9 @@
+import tkinter as tk
+from tkinter import ttk
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import serial
 from datetime import datetime
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import csv
 import os
@@ -10,8 +13,15 @@ serial_port = 'COM3'  # Replace with your serial port
 baud_rate = 115200
 
 # Create figure for plotting
-fig, (ax1, ax2) = plt.subplots(2, 1)  # Creating two subplots vertically
-plt.subplots_adjust(hspace=0.3, bottom=0.2)  # Adjusting vertical spacing and bottom margin
+fig = Figure(figsize=(8, 6))
+ax1 = fig.add_subplot(211)  # Creating two subplots vertically
+ax2 = fig.add_subplot(212)
+ax1.set_title('Water Pressure Over Time')
+ax1.set_ylabel('Pressure (hPa)')
+ax2.set_title('Water Depth Over Time')
+ax2.set_ylabel('Depth (cm)')
+ax2.set_xlabel('Time')
+ax2.tick_params(axis='x', rotation=45)
 xs_pressure = []
 ys_pressure = []
 xs_depth = []
@@ -65,8 +75,6 @@ def animate(i):
         ax1.plot(xs_pressure, ys_pressure)
         ax1.set_title('Water Pressure Over Time')
         ax1.set_ylabel('Pressure (hPa)')
-
-        # Remove x-axis tick labels from ax1
         ax1.set_xticklabels([])
 
         ax2.clear()
@@ -74,7 +82,6 @@ def animate(i):
         ax2.set_title('Water Depth Over Time')
         ax2.set_ylabel('Depth (cm)')
         ax2.set_xlabel('Time')
-
         ax2.tick_params(axis='x', rotation=45)
 
 def main():
@@ -82,17 +89,27 @@ def main():
     try:
         # Open the serial port
         ser = serial.Serial(serial_port, baud_rate, timeout=1)
-        # time.sleep(2)  # No longer needed
-
+        
         # Check if the CSV file exists, if not, create it with headers
         if not os.path.exists('data.csv'):
             with open('data.csv', mode='w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(['Timestamp', 'Pressure (hPa)', 'Depth (cm)'])
 
+        # Create Tkinter GUI
+        root = tk.Tk()
+        root.title("Surge Sentinel")
+        root.geometry("800x600")
+
+        # Create a canvas
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
         # Start the animation
         ani = animation.FuncAnimation(fig, animate, interval=250)
-        plt.show()
+
+        root.mainloop()
 
     except Exception as e:
         print(f"An error occurred: {e}")
