@@ -1,0 +1,975 @@
+<!-- 
+ JB_Serial_Data_Browser_Client.html
+
+ 6 June 2024 > This is a web based serial cliernt for the JB and VJB which allows the 
+ user to conenct a serial device like an arduino to their web browser and then
+ have it send serial data to the JackBord or Virtual JackBord.
+ The data is sent on the PID/srxd topic and the JB can send serial data to the
+ device usnig the stxd command.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.2.7/purify.min.js"></script>
+ <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+ <title>JackBord Serial Data Browser Client</title>
+ <style>
+ body, html {
+ margin: 0;
+ padding: 0;
+ height: 95%;
+ font-family: Arial, sans-serif;
+ background-color: #f4f4f4;
+ }
+ #page_content {
+ display: flex;
+ flex-direction: column;
+ height: 100%;
+ margin:20px;
+ padding: 20px;
+ border-style: solid;
+ border-width: 2px;
+ border-radius: 25px;
+ border-color: lightcoral;
+ }
+ #terminal_connect_div {
+ display: flex;
+ flex-direction: column;
+ align-items: left;
+ }
+ #command_prompt_div {
+ padding: 10px;
+ }
+ #command_prompt {
+ width: 75%;
+ }
+ #terminal_textarea {
+ flex-grow: 1; /* This will make it grow to occupy all remaining space */
+ overflow: auto; /* Enable scrolling if the content overflows */
+ background-color: #fff;
+ }
+ button, select {
+ margin: 5px;
+ }
+ #heading {
+ padding: 5px;
+ }
+ </style>
+</head>
+<body>
+<span id="page_content">
+ <div id="heading">
+ <img style="height:50px;" src="https://jb.works/jackbord_images/med_home_icon_idx82612572.png"/>
+ <span style="font-size: x-large;">JackBord Serial Data Terminal</span>
+ <ol>
+ <li>Connect your serial device to your PC's USB port using the USB cable</li>
+ <li>Click on the connect button below. Choose the USB port the device is connected to</li>
+ <li>Send comamnds to the device using the command prompt</li>
+ </ol>
+ </div>
+ <div id="command_history_div"></div>
+ <div id="terminal_connect_div">
+ <table>
+ <tr>
+ <td>
+ <label for="baudRate">Baud Rate:</label>
+ <select id="baudRate">
+ <option value="115200">115200</option>
+ <option value="9600">9600</option>
+ <option value="19200">19200</option>
+ <option value="38400">38400</option>
+ <option value="57600">57600</option>
+ <option value="115200">115200</option>
+ </select>
+ <button id="connect">Connect</button>
+ <label id="connected_message">
+ <div id="status-panel"> 
+ <b>Internet:</b> <label id="internet_status_message"></label>&nbsp;&nbsp;&nbsp;&nbsp;
+ <b>MQTT:</b> <label id="mqtt_status_message"></label>&nbsp;&nbsp;&nbsp;&nbsp;
+ <b>USB:</b> <label id="usb_status_message"></label>&nbsp;&nbsp;&nbsp;&nbsp;
+ <b>JB BASIC:</b> <label id="jb_basic_status_message"></label>
+ <label id="general_error_message"></label>
+
+ <td>Profile ID: <label id="jb_basic_web_profile_id"></label> SW Ver<label id="sw_ver_message"></label></td>
+ </div>
+ </td> 
+ </tr>
+ <tr>
+ <td colspan="4" ></td> 
+ </tr>
+ </table> 
+ </div>
+ <div id="command_prompt_div" >
+ <label for="input">Command:</label>
+ <input id="command_prompt" type="text" placeholder="Type commands for the device here and press Enter." >
+ <button id="send">Send</button>
+ <button id="clear">Clear Terminal</button>
+ </div>
+ <textarea id="terminal_textarea" readonly></textarea>
+</span>
+<script>
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+ const connectButton = document.getElementById('connect');
+ const baudRateSelect = document.getElementById('baudRate');
+ const outputArea = document.getElementById('terminal_textarea');
+ const inputArea = document.getElementById('command_prompt');
+ const sendButton = document.getElementById('send');
+ const clearButton = document.getElementById('clear');
+ let port;
+ let reader;
+
+ // Command history variables
+ const commandHistory = [];
+ let historyIndex = -1;
+
+ // Hide the Command prompt until we are connected.
+ var command_prompt = document.getElementById('command_prompt_div');
+ command_prompt.style.display = 'none';
+ command_history_div.textContent = "";
+
+ // @debug
+ // MQTT Debug >>>>>>>>>>>>>
+ // 0 = NO 1 = YES
+ let mqtt_debug = 1;
+
+ // Command Debug >>>>>>>
+ let cmd_debug = 10;
+
+ // JB Serial Data Browser Cleint Version
+ let sw_ver = "1.0.1";
+
+
+ // Display the web helpers SW ver. >>>>>>>>>>>>>
+ sw_ver_message.textContent = sw_ver;
+
+
+/*
+ Session State >>>>>>>>>>>>>>>>>>>>>
+ Holds the session state for this session and is saved to a cookie. 
+
+ Values are:
+
+ Name Value
+ pg_no Current page no
+ pg_name Name of the current page
+ pg_mode Current page mode
+ loggedon User is logged on 0 = NO 1 = YES
+*/
+let ses_state = {};
+
+// Set Safe Defaults >>>>>>>>>>>>>>>>>>>>
+ses_state['loggedon'] = 0;
+
+ /*
+ @MQTT Server Parameters >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ These are ALL of the parameters for the mqtt server.
+ Default port is 8084.
+ */
+ // Server Details 
+ let mqtt_server_addr = 'wss://wsa.jackbord.org';
+ let mqtt_server_port = 443;
+
+ // Mqtt Handle. >>>>>>>>>
+ let mqtt_handle = "";
+
+ 
+ // Connection state 0 = NOT connected 1 = Connected.
+ let mqtt_connection_state = 0;
+
+ /*
+ JB Profile User id and PW >>>>>>
+ These are the same profile ID and peofile PW
+ thats usually used by a physical JackBord when its adopted.
+ */
+ let jb_pid = "0000";
+ let mqtt_server_user_id = "0000";
+ let mqtt_server_user_pw = "00000000";
+
+ 
+ // Conection Tries and limits >>>>>>>>>>>>>>>>>>>>>
+ // This is reset back to 0 by the login func.
+ let mqtt_server_failed_connection_count = 0;
+
+ // MQTT Error Message
+ let mqtt_server_error_message = "";
+
+ // MQTT Reconnect delay. Make this a random value between 1000 and 5000 msecs.
+ let mqtt_server_re_connect_delay_ms = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
+
+ // Give up after this no of failed conenctions.
+ let mqtt_server_failed_connection_count_threshold = 5;
+
+ // Default Service id is SHOW
+ let mqtt_service_id = "";
+
+ /*
+ @Subscribe to the VJB >>>>>>>>>>>>>
+ We need to subscribe to the VJB's PID/stxd topic.
+ When the VJB or JB wants to send serial data to the
+ device it will send it to this topic and we will relay
+ it to the device.
+ */
+ let vjb_tx_data_mqtt_topic = jb_pid + '/stxd';
+
+ /*
+ Get the URL Parameters >>>>>>>>>>>>>>
+ pid=JBpid
+ pw=JB pw
+
+ eg 
+ file:///Users/jack/1_JackBord/Github/JB_BASIC_Browser_Client/jb_basic_web_client.html?pid=10Eg&pw=55faf0021dc9
+ */
+ // Get the query string from the URL
+ var queryString = window.location.search;
+
+ // Remove the leading "?" character
+ queryString = queryString.substring(1);
+
+ // Create a URLSearchParams object from the query string
+ const urlParams = new URLSearchParams(queryString);
+
+ // Get the pid and pw from the URL. >>>>>>>>>>>
+ jb_pid = urlParams.get('pid');
+
+ // 15 Feb 2024 > Use the new qtid for the mqtt from now on.
+ mqtt_server_user_id = urlParams.get('qtid');
+ // mqtt_server_user_id = jb_pid;
+ mqtt_server_user_pw = urlParams.get('pw');
+
+ d("PARAMS> [" + queryString + "] pid [" + jb_pid + "] mqtt id [" + mqtt_server_user_id + "] pw [" + mqtt_server_user_pw + "]");
+
+
+
+
+/*
+ JB BASIC is Ready >>>>>>>>>>>>>
+ Set to 1 when the JB BASIC is connected and has
+ sent its sw version.
+ ie the jb_basic_sw_ver var is set.
+*/
+let jb_basic_is_ready = 0;
+
+/*
+ Connection Tries >>>>>>>>>>>>
+ Inc by 1 each time the check_jb_basic_is_connected_ok()
+ function fails to connect.
+*/
+let jb_basic_connection_tries = 0;
+
+// Mqtt Topic
+let topic = "";
+let message = "";
+
+ // @Connect to the MQTT Server >>>>>>>>>>>>>>>>>>
+ mqtt_handle = connect_to_mqtt_server(mqtt_server_addr, mqtt_server_port, mqtt_server_user_id, mqtt_server_user_pw );
+
+
+
+
+
+ /*
+ Check if the User is Using the Correct Web Browser.
+ If not tell the user.
+ */
+ const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+ const isEdge = /Edg\//.test(navigator.userAgent);
+
+ if (!isChrome && !isEdge) {
+ // tell the user.
+ alert('This page will ONLY woth wtih a Chrome or Edge web browser.');
+
+ // Update the Status
+ connected_message.textContent = 'ERROR: This page will ONLY woth wtih a Chrome or Edge web browser.';
+ }
+
+ async function connect() {
+ /*
+ Prompt the User to select the USB port and then conenct to it.
+ */
+ const baudRate = parseInt(baudRateSelect.value, 10);
+ port = await navigator.serial.requestPort();
+ await port.open({ baudRate });
+ reader = port.readable.getReader();
+ // Read Data from the Serial Port >>>>>>>>>
+ readLoop();
+ }
+
+ async function readLoop() 
+ { // @serial @mpl
+ /*
+ This is the main loop for receiving serial Data from the JackBord via USB.
+ All of the serial data sent by the JackBords comes here.
+ We also check for the #START_WIFI command so we can get the Wifi ssid list
+ from the JackBord.
+ */
+ let buffer = '';
+ const textDecoder = new TextDecoder();
+ // Set to 0 to stop sending serial data to the terminal window.
+ let update_temrnial_window = 1;
+ 
+ // Process the new Wifi Data >>>>>>>>>>>>>>>>
+ while (true) 
+ {
+ // Get each new character from the serial port. >>>>>>>>>>>
+ // const { value, done } = await reader.read();
+
+ // 6 June 2024 > Catch the loss of the Serial Connection >>>>>>>>>>
+ try {
+ ({ value, done } = await reader.read());
+ } catch (error) 
+ {
+ /*
+ If the user unplugs the serial port we end up here.
+ */
+ console.error("ERROR> Serial Port:", error);
+ 
+ // Handle the disconnection or other errors here.
+ quit_prog = 1;
+
+ // Tell the user
+ connected_message.textContent = 'Device is Disconnected.';
+
+ // Tell the User
+ alert('USB Connection lost. \n\nPlease check the USB connection. \n\nThe page will reload. ');
+
+ // Reload the Browser page. >>>>>>>>>>>
+ location.reload();
+
+ // Exit
+ return;
+ }
+
+
+ /*
+ Check for New Serial Data from the Serial Port >>>>>>>>>>>>>>>>>>>>>>>>
+ */
+ if (value) 
+ {
+ // Process each character >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ buffer += textDecoder.decode(value, { stream: true });
+ let newlineIndex;
+
+ // Append the new char until we get \n >>>>>>>>>>>>>>>
+ while ((newlineIndex = buffer.indexOf('\n')) >= 0) 
+ {
+ // Get the new Line >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ let new_line = buffer.substring(0, newlineIndex + 1);
+ buffer = buffer.substring(newlineIndex + 1);
+ // console.log('New line [' + new_line + ']\n');
+
+
+ /*
+ Update the Terminal Window. >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ Only do this if the update_temrnial_window var is 1.
+ The new data from the JB will appear at the bottom of the scrolling window.
+ If the user scrolls up the new data will still be added to the bottom but the
+ window will remain where the user left it.
+ */
+ if (update_temrnial_window == 1) {
+ // Update the terminal window. >>>>>>>
+ // outputArea.value += new_line;
+ // Check if the user is at or near the bottom of the output area
+ if (outputArea.scrollTop + outputArea.clientHeight >= outputArea.scrollHeight - 5) {
+ outputArea.value += new_line;
+ outputArea.scrollTop = outputArea.scrollHeight; // Scroll to the bottom if the user is already at or near the bottom
+ } else {
+ outputArea.value += new_line;
+ }
+ } // end if
+
+ /*
+ Send the New Data Line to the VJB via MQTT >>>>>>>>>>>>>>>>>>>>>>>>>
+ Send it to the pid/srxd topic so the VJB can receive it.
+ */
+ // Remove the \n from the new_line
+ new_line = new_line.trimEnd();
+ send_mqtt( jb_pid + '/cmd', 'srxd ' + new_line );
+ 
+ } // end while ((newlineIndex = buffer.indexOf('\n')) >= 0)
+ } // end if
+ if (done) {
+ 
+ alert("lost it");
+ reader.releaseLock();
+ break;
+ }
+ } // End while (true)
+
+ } // End readLoop()
+
+
+
+ async function disconnect() {
+
+ if (reader) {
+ await reader.cancel();
+ reader = null;
+ // Hide the Command prompt if we disconnect from the USB
+ var command_prompt = document.getElementById('command_prompt_div');
+ command_prompt.style.display = 'none';
+ 
+ // Tell the user
+ connected_message.textContent = 'Device is Disconnected.';
+ }
+ await port.close();
+ port = null;
+
+} // end disconnect()
+
+ /*
+ Connect to the USB Port Once User Selects it >>>>>>>>.
+ */
+ connectButton.addEventListener('click', async () => {
+ if (port) {
+ await disconnect();
+ connectButton.textContent = 'Connect';
+ return;
+ }
+
+ // Wait for the Serial Connection to be established >>>>>>>>
+ await connect();
+ connectButton.textContent = 'Disconnect';
+ connected_message.textContent = 'Device is Connected.';
+ // Show the Command prompt now we are connected.
+ var command_prompt = document.getElementById('command_prompt_div');
+ command_prompt.style.display = 'block';
+ });
+
+
+ /*
+ Send Command Button Listener >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ This will send the new command in the command prompt 
+ out the serial port to the device.
+ */
+ sendButton.addEventListener('click', async () => {
+ const writer = port.writable.getWriter();
+ const data = new TextEncoder().encode(inputArea.value + '\n');
+ await writer.write(data);
+ writer.releaseLock();
+ inputArea.value = '';
+ });
+
+ /*
+ Clear the Terminal Display Area >>>>>>>>>>>>>>>>>>>>>
+ User clicks the Clear Terminal button.
+ */
+ clearButton.addEventListener('click', () => {
+ outputArea.value = '';
+ });
+
+
+ inputArea.addEventListener('keydown', (event) => {
+ /*
+ Get the commands from the user and run them.
+ We also have a comamnd history so they can press up arrow to
+ to view past commands.
+ */
+ if (event.key === 'ArrowUp') {
+ if (currentCommandIndex > 0) {
+ currentCommandIndex--;
+ }
+ inputArea.value = commandHistory[currentCommandIndex] || '';
+ event.preventDefault(); // Prevent cursor from moving to the beginning of the line
+ } else if (event.key === 'ArrowDown') {
+ if (currentCommandIndex < commandHistory.length - 1) {
+ currentCommandIndex++;
+ } else {
+ currentCommandIndex = -1;
+ inputArea.value = ''; // Clear input if no more history
+ return;
+ }
+ inputArea.value = commandHistory[currentCommandIndex];
+ event.preventDefault(); // Prevent cursor from moving to the end of the line
+ } else if (event.key === 'Enter') {
+ event.preventDefault(); // Prevents a newline from being added
+ const command = inputArea.value.trim();
+ if (command && (!commandHistory.length || command !== commandHistory[commandHistory.length - 1])) {
+ commandHistory.push(command);
+ }
+ currentCommandIndex = commandHistory.length; // Reset index
+
+ // Send the Command to the Serial Device.
+ sendCommand();
+ }
+ command_history_div.textContent = commandHistory;
+ });
+
+
+ // Send the Command to the Serial Device.
+ function sendCommand() {
+ if (port && port.writable) {
+ const writer = port.writable.getWriter();
+ const data = new TextEncoder().encode(inputArea.value + '\n');
+ writer.write(data).then(() => writer.releaseLock());
+ inputArea.value = '';
+ }
+ }
+
+
+/*
+ @mqtt Functions >>>>>>>>
+*/
+
+
+
+function connect_to_mqtt_server( server_addr, server_port, user_id, user_pw )
+{ // @mqtt @connect
+/*
+ Connect to the MQTT Server using the provided info. 
+ Once in subscribe to the needed topics.
+*/
+let debug_prefix = "MQTT>CON>";
+
+
+ // Sanitise the server URL >>>>>>>
+ mqtt_server_addr = DOMPurify.sanitize(server_addr);
+ mqtt_server_port = DOMPurify.sanitize(server_port);
+
+ mqtt_server_user_id = DOMPurify.sanitize(user_id);
+ mqtt_server_user_pw = DOMPurify.sanitize(user_pw);
+ 
+ // Update the profile id. >>>>>>>>>>>>>
+ // 15 Feb 2024 > use the jb_pid > So the user see the dash Profile ID.
+ jb_basic_web_profile_id.textContent = jb_pid;
+
+ // Exit if the mqtt_server_user_id is 0000 ie NOT set. >>>>
+ if( mqtt_server_user_id == 0 )
+ {
+ // NO pid or pw provided so exit.
+ 
+ // @debug
+ d( debug_prefix + ' TOP> ERROR> NO PID> [' + server_addr + '] port [' + server_port + '] id [' + mqtt_server_user_id + '] pw [' + mqtt_server_user_pw + '] txd topic [' + vjb_tx_data_mqtt_topic + ']' );
+
+ // Tell the user.
+ alert("Profile PID missing. Please run this from the BASIC link on the dashboard.");
+
+ return(0);
+ }
+
+ // Disconnect if already connected >>>>>>>>>>>
+ if( mqtt_handle.connected )
+ {
+ // Already connected so disconnect >>>>>>>>>
+ disconnect_from_mqtt_server();
+ 
+ } // end if
+
+
+ // @debug
+ d( debug_prefix + ' TOP> [' + server_addr + '] port [' + server_port + '] id [' + mqtt_server_user_id + '] pw [' + mqtt_server_user_pw + '] cmd topic [' + vjb_tx_data_mqtt_topic + ']' );
+
+ 
+ /*
+ @mqtt> Set the connect options >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ This incldues the user id and pw for the MQTT server.
+
+ DANGER Set the mqttVersion to 4 so we avoid the Javascript Browser Enless connection loop.
+
+ 5 May 2023> added protocol Version: 5
+ */
+ const options = {
+ qos: 1,
+ clientId: "test_jbasic_" + Date.now() + "_" + Math.random().toString(16).substr(2, 8),
+ protocol: 'wss',
+ port: mqtt_server_port,
+ path: '/mqtt',
+ mqttVersion: 4,
+ protocolVersion: 5,
+ reconnectPeriod: mqtt_server_re_connect_delay_ms, // try to reconnect every mqtt_server_re_connect_delay_ms.
+ resubscribe: true, // Auto re-subscribe to topics.
+ useSSL: true,
+ timeout: 3,
+ publishTimeout: 10000, // Set the timeout to 10 seconds for all publish operations
+ mqttVersionExplicit: true,
+ username: mqtt_server_user_id,
+ password: mqtt_server_user_pw,
+ rejectUnauthorized: true, // This option ensures that the client verifies the server's certificate
+
+ onSuccess: onConnect,
+ };
+
+ d( debug_prefix + ' TOP2> [' + server_addr + '] port [' + server_port + '] id [' + mqtt_server_user_id + '] pw [' + mqtt_server_user_pw + ']');
+
+ // Create a new MQTT client instance
+ mqtt_handle = mqtt.connect(mqtt_server_addr, options);
+
+
+ // Handle MQTT On Connect Event >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ // Set the onConnect function as a callback for when the client connects
+ // This does all of the subscriptions.
+ mqtt_handle.on('connect', onConnect);
+
+
+ // Listen for the 'message' event
+ mqtt_handle.on('message', function (topic, message) 
+ {
+ // console.log(`Received message on topic ${topic}: ${message.toString()}`);
+
+ /*
+ Convert the topic and message to a string before we pass them on
+ */
+ topic = topic.toString();
+ message = message.toString();
+
+ // Process the New Message >>>>>>>>>>>>>>
+ on_new_mqtt_message( topic, message);
+
+ });
+
+
+
+ // Listen for the 'error' event >>>>>>>>>>>>>
+ mqtt_handle.on('error', function (err) 
+ {
+ // Set to 0 for not connected.
+ mqtt_connection_state = 0;
+
+ // get error message and tell the user.
+ mqtt_server_error_message = 'Disconnected> count [' + mqtt_server_failed_connection_count + '] re-con delay [' + mqtt_server_re_connect_delay_ms + '] msecs. Error: ' + err;
+ 
+ console.error('MQTT>Error> count [' + mqtt_server_failed_connection_count + '] re-con delay [' + mqtt_server_re_connect_delay_ms + '] msecs. Error: ', err);
+
+
+ // Parse the error for the user >>>>>>>>>>>>>>>>>>>>>>
+ // Convert err to a string and get error message
+ const errorMessage = err.toString();
+ 
+ // Remove ErrorWithReasonCode:
+ const humanReadableError = errorMessage.replace(/^ErrorWithReasonCode: /, '');
+
+ mqtt_status_message.textContent = 'ERROR: ' + humanReadableError + " " + mqtt_server_failed_connection_count + "/" + mqtt_server_failed_connection_count_threshold;
+
+ // Disconnect & STOP trying to reconnect. >>>>>>>>>>>>>>>>>>>
+ if( mqtt_server_failed_connection_count >= mqtt_server_failed_connection_count_threshold )
+ {
+ // Tell the USER 
+ mqtt_server_error_message = 'Login failed. Please check your user id and password.';
+ 
+ general_error_message.textContent = 'Login failed. Please check your user id and password.';
+
+ // Stop trying to Connect 
+ disconnect_from_mqtt_server();
+ }
+
+ // Keep track. 
+ mqtt_server_failed_connection_count++;
+
+ });
+
+
+ // Listen for the 'close' event
+ mqtt_handle.on('close', function () 
+ {
+ // Set to 0 for not connected.
+ mqtt_connection_state = 0;
+ // mqtt_status_message.textContent = 'ERROR: Connection closed ' + mqtt_server_failed_connection_count + "/" + mqtt_server_failed_connection_count_threshold;
+ });
+
+
+ // Listen for the 'offline' event
+ mqtt_handle.on('offline', function () 
+ {
+ // Set to 0 for not connected.
+ mqtt_connection_state = 0;
+
+ // mqtt_status_message.textContent = 'ERROR: Connection offline ' + mqtt_server_failed_connection_count + "/" + mqtt_server_failed_connection_count_threshold;
+ });
+
+
+ // Listen for the 'reconnect' event
+ mqtt_handle.on('reconnect', function () 
+ {
+ 
+ d('MQTT reconnect try [' + mqtt_server_failed_connection_count + '] u [' + mqtt_server_user_id + '] p [' + mqtt_server_user_pw + ']' );
+ 
+ // mqtt_status_message.textContent = 'ERROR: Trying to reconnect. ' + mqtt_server_failed_connection_count + "/" + mqtt_server_failed_connection_count_threshold;
+
+ if ( mqtt_server_failed_connection_count >= mqtt_server_failed_connection_count_threshold )
+ {
+ // Stop trying to connect
+ disconnect_from_mqtt_server();
+
+ // Tell the user >>>>>>>>
+ rip_term( "", "Failed to connect to the server. Please check your user id and password..");
+ }
+
+ });
+
+ // Return the mqtt_handle we created.
+ return(mqtt_handle);
+
+} // end connect_to_mqtt_server()
+
+
+
+
+/**
+ * 
+ * @param {String} topic 
+ * @param {String} message 
+ */
+ function on_new_mqtt_message( topic, message) 
+{ // @new @mqtt
+ /*
+ Called when a new MQTT message arrives >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ We have a new MQTT message so we need to check the topic so we know what
+ to do with it.
+ */
+ /*
+ Check for any NON Ascii chars in the Message >>>>>>>>>>>>>>
+ let ascii = /^[ -~]+$/;
+
+ if ( !ascii.test( message ) )
+ {
+ // Message string has non-ascii characters
+ d("JS MQTT NON ASCII Chars in Message [" + topic + "] Text [" + message + "]");
+
+ }
+ */
+
+ // Check the topic is ok >>>>>>>>
+ if (!topic) {
+ // Bad topic.
+ alert('MQTT>NEW> bad topic [' + topic + ']');
+ }
+
+ // Check the message is ok >>>>>>>>>>>>>>>>>
+ if (!message) {
+ // Bad message ie no message contents.
+ // alert('Empty Message [' + message + ']');
+ console.log('MQTT>NEW> Empty Message [' + message + ']');
+ }
+ 
+ 
+
+ /* 
+ Remove the Trailing \n\r and/or \n CR from the Message >>>>>>>>>>>>>>>>>>>
+
+ Note just remove them from the end of the message.
+ ie use raw_message.replace(/(\r\n|\n|\r)$/, "");
+ */
+ let raw_message = message;
+ // message = raw_message.replace(/(\r\n|\n|\r)/gm, "");
+ 
+ // 10 April 2023 > Just remove from the end.
+ message = raw_message.replace(/(\r\n|\n|\r)$/, "");
+ 
+
+ // Check the topic is ok >>>>>>>>
+ if (!topic) {
+ // Bad topic. >>>>>>>>>>>>>
+ // DEBUG >
+ if (mqtt_debug >= 1) {
+ d("MQTT>NEW> BAD topic [" + topic + "] Message [" + message + "]");
+ }
+
+ } // end if bad topic
+
+
+ // Check the message is ok >>>>>>>>>>>>>>>>>
+ if (!message) {
+ // Bad message ie no message contents.
+ // DEBUG >
+ if (mqtt_debug >= 1) {
+ d("MQTT>NEW> BAD Message: topic [" + topic + "] Message [" + message + "]");
+ }
+
+ } // end if 
+
+ /*
+ Sanitise the Received Topic and Message before Using it >>>>>>>>>>>>>>>>>
+ 19 April 2021 > Check and clean all mqtt data.
+ */
+ // topic = DOMPurify.sanitize(topic);
+ // message = DOMPurify.sanitize(message);
+
+ // DEBUG > We have a NEW mqtt Message
+ if (mqtt_debug >= 1) 
+ {
+ if( message.length > 250 )
+ {
+ // Long message truncate it
+ let short_ver = message.slice(0, 100);
+ d("MQTT>NEW>LONG> topic [" + topic + "] Message [" + short_ver + "]");
+ }
+ else
+ {
+ // Show all
+ d("MQTT>NEW> topic [" + topic + "] Message [" + message + "]");
+ }
+ }
+ 
+
+ /*
+ Process the Command >>>>>>>>>>>
+ We will run the command in the command_interpreter() func.
+ */
+ try {
+
+ 
+
+
+ } catch (error) 
+ {
+ d("MQTT>NEW>ERROR> [" + error + "] topic [" + topic + "]");
+
+ } // end try
+
+
+} // End on_new_mqtt_message()
+
+
+
+
+function disconnect_from_mqtt_server()
+{ // @disconnect 
+
+let debug_prefix = "MQTT>DISC>";
+
+ d( debug_prefix + " FROM> [" + mqtt_server_addr + ' port [' + mqtt_server_port + '] id [' + mqtt_server_user_id + ']');
+
+ // Disconnect from the MQTT Server >>>>>>>
+ mqtt_handle.end();
+
+ // Wait for the Disconnection >>>>>>>>>
+ let wait_count = 0;
+ while ( ( mqtt_connection_state == 1 ) && 
+ ( wait_count < 10 ) )
+ {
+ d( debug_prefix + " Disconnect. [" + wait_count + "]");
+ delay_ms(1000);
+ wait_count++;
+ }
+
+ return(0);
+
+} // end disconnect_from_mqtt_server()
+
+
+
+function onConnect() 
+{ // @connect @mqtt
+ /*
+ Once we have successfully connected to the MQTT Server come here.
+ Once a connection has been made, make a subscription and send a message.
+ */
+
+let debug_prefix = "MQTT>ON>CON>";
+
+ d( debug_prefix + " Connected to> [" + mqtt_server_addr + ' port [' + mqtt_server_port + '] mqtt_server_user_id ' + mqtt_server_user_id + ']');
+
+ // Connected >>>>>>>>>>>>>>>>>>>
+ mqtt_connection_state = 1;
+
+ mqtt_status_message.textContent = 'OK';
+
+ // User IS logged on >>>>>>>>
+ ses_state['loggedon'] = 1;
+
+ // Set the failed conenctions threshold for once we are connected.
+ mqtt_server_failed_connection_count_threshold = 5;
+ 
+
+ /*
+ Subscribe to the pid/stxd topic >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ If the virtual JB wants to send serial data to the device
+ it will do so using this topic.
+ Thus when the user runs the stxd command on the virtual jb 
+ all of the text after the stxd will be sent to the serial device 
+ connected to us.
+ */
+ vjb_tx_data_mqtt_topic = jb_pid + '/stxd';
+ mqtt_handle.subscribe( vjb_tx_data_mqtt_topic, function (err) 
+ {
+ if (!err) 
+ {
+ // Connected OK >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ d( debug_prefix + 'Subscribed to: ' + vjb_tx_data_mqtt_topic );
+ } else 
+ {
+ console.log( debug_prefix + 'Failed to subscribe to PID/stxd ', err);
+ }
+ });
+ 
+ // Say Hi >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ send_mqtt( jb_pid + '/cmd', '#serial_data_client_ok' );
+
+
+} // End onConnect()
+
+
+
+function send_mqtt(topic, message) 
+{ // @send
+ /*
+ When called this func will send a new mqtt message.
+ */
+
+ // Dont send if we are not connected >>>>>>
+ if( ses_state['loggedon'] == 0 )
+ {
+ // NOT connected
+ general_error_message.textContent = "Send mqtt> NOT logged in.";
+
+ return(1);
+ }
+
+ /*
+ Sanitise the Topic and Message before Sesnding >>>>>>>>>>>>>>>>>
+ Check and clean all mqtt data.
+ */
+ topic = DOMPurify.sanitize(topic);
+ message = DOMPurify.sanitize(message);
+
+ /*
+ Send the Message >>>>>>>>>>>>>>>>>>>>>>>>
+ */
+ const responseTopic = 'SHOW/' + mqtt_server_user_id + '/cmd';
+
+ const publishOptions = {
+ properties: {
+ responseTopic: responseTopic
+ }
+ };
+ 
+ 
+
+ // 5 May 2023 > use mqtt 5.
+ // mqtt_handle.publish(topic, message, function (err) 
+ mqtt_handle.publish(topic, message, publishOptions, function (err) 
+ {
+ if (err) 
+ {
+ console.log('Failed to publish message:', err);
+ } 
+ 
+ });
+
+
+ // all ok
+ return(0);
+
+} // End send_mqtt()
+
+
+
+
+ /*
+ @d @debug Jacks Display Debug Info >>>>>>>>>>>>>>>
+ Use instead of console.log()
+ */
+ function d(info) {
+ if (cmd_debug != 0) {
+ console.log(info);
+ }
+ }
+});
+</script>
+</body>
+</html>
