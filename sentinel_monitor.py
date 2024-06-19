@@ -17,7 +17,7 @@ ser = serial.Serial(port, baudrate)
 # MySQL database configuration
 db_config = {
     'user': 'surge_sentinel_admin',  # Replace with your MySQL username
-    'password': 'Xyru$04147MS',  # Replace with your MySQL password
+    'password': 'Xyrus04147!MS',  # Replace with your MySQL password
     'host': 'localhost',
     'database': 'sensor_data',
 }
