@@ -39,16 +39,20 @@ def insert_data(timestamp, water_pressure, water_depth):
 # MQTT broker configuration
 dest_broker = "wsa.jackbord.org"
 dest_port = 443  # Secure WSS port
-dest_username = "117112657838025786605"
-dest_password = "1b77bb526e"
-dest_topic = "10Gy/cmd"
-hi = 'hi'
+dest_username = "101420912423480827669" # "117112657838025786605"
+dest_password = "15e0e16960" # "1b77bb526e"
+dest_topic = "10Hm/cmd" # "10Gy/cmd"
+boot = "hi|sledn 102"
+alert = "runu 1"
+exitprog = "exitprog|sledoff"
+duration = 20
+threshold = 1030
 
 # Define the callback function for connection
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("Connected to broker")
-        client.publish(dest_topic, hi)  # Publish 'hi' message on connection
+        print("Connected to broker, on standby")
+        client.publish(dest_topic, boot)  # Publish 'boot' message on connection
     else:
         print(f"Connection failed with code {rc}")
 
@@ -117,10 +121,12 @@ try:
                     if average_window:
                         avg_pressure = sum([item[1] for item in average_window]) / len(average_window)
 
-                        # Publish MQTT message if average pressure exceeds 1100
-                        if avg_pressure >= 1100:
-                            client.publish(dest_topic, hi)
+                        # Publish MQTT message if average pressure exceeds the threshold
+                        if avg_pressure >= threshold:
+                            client.publish(dest_topic, alert)
                             print(f'Published alert: Average pressure = {avg_pressure:.2f}')
+                            time.sleep(duration)
+                            client.publish(dest_topic, exitprog)
 
                 except ValueError:
                     print("Error: Invalid data format")
@@ -130,6 +136,7 @@ try:
 
 except KeyboardInterrupt:
     print("Exiting program")
+    client.publish(dest_topic, exitprog)
 
 # Close the database connection
 cursor.close()
