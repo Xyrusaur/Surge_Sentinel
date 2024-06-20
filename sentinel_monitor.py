@@ -45,7 +45,7 @@ dest_topic = "10Hm/cmd" # "10Gy/cmd"
 boot = "hi|sledn 102"
 alert = "runu 1"
 exitprog = "exitprog|sledoff"
-duration = 20
+duration = 3
 threshold = 1030
 
 # Define the callback function for connection
