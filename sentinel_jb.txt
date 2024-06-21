@@ -1,0 +1,38 @@
+---
+    JackBord Alarm System
+---
+
+prog_start =
+
+    pclear
+    print "Program Start"
+    sledn 102
+    
+prog_start.
+
+prog_loop =
+
+    repeat 40 ->
+        sled 103 3
+        dly 20
+        sled 103 9
+        dly 20
+        sled 103 13
+        dly 20
+        a1 1
+    repeat.
+    
+    sledoff
+    a1 0
+    dly 10000
+    exitprog
+    
+prog_loop.
+   
+prog_stop =
+
+    print "Program End"
+    sledoff
+    a1 0
+    
+prog_stop.

@@ -39,14 +39,14 @@ def insert_data(timestamp, water_pressure, water_depth):
 # MQTT broker configuration
 dest_broker = "wsa.jackbord.org"
 dest_port = 443  # Secure WSS port
-dest_username = "101420912423480827669" # "117112657838025786605"
-dest_password = "15e0e16960" # "1b77bb526e"
-dest_topic = "10Hm/cmd" # "10Gy/cmd"
+dest_username = "101420912423480827669" # 117112657838025786605 101420912423480827669
+dest_password = "15e0e16960" # 1b77bb526e 15e0e16960
+dest_topic = "10Hm/cmd" # 10Gy/cmd 10Hm/cmd
 boot = "hi|sledn 102"
-alert = "runu 1"
-exitprog = "exitprog|sledoff"
-duration = 3
-threshold = 1030
+alert = "runu 1" # runu 6 runu 1
+exitprog = "exitprog"
+duration = 5
+threshold = 0.5
 
 # Define the callback function for connection
 def on_connect(client, userdata, flags, rc):
@@ -83,9 +83,6 @@ client.tls_insecure_set(True)  # if the server uses a self-signed certificate, u
 client.connect(dest_broker, dest_port)
 client.loop_start()
 
-# Initialize variables for averaging
-average_window = []  # This will store pressure values for the last 5 seconds
-
 # Read data from serial monitor in a loop
 try:
     while True:
@@ -110,23 +107,12 @@ try:
                     # Insert data into MySQL database
                     insert_data(timestamp, water_pressure, water_depth)
 
-                    # Add current pressure value to the average window
-                    average_window.append((timestamp, water_pressure))
-
-                    # Remove old values from the window (keep only last 5 seconds)
-                    while average_window and (timestamp - average_window[0][0] > timedelta(seconds=5)):
-                        average_window.pop(0)
-
-                    # Calculate average pressure over last 5 seconds
-                    if average_window:
-                        avg_pressure = sum([item[1] for item in average_window]) / len(average_window)
-
-                        # Publish MQTT message if average pressure exceeds the threshold
-                        if avg_pressure >= threshold:
-                            client.publish(dest_topic, alert)
-                            print(f'Published alert: Average pressure = {avg_pressure:.2f}')
-                            time.sleep(duration)
-                            client.publish(dest_topic, exitprog)
+                    # Publish MQTT message if average pressure exceeds the threshold
+                    if water_depth >= threshold:
+                        client.publish(dest_topic, alert)
+                        print(f'Published alert: Water depth = {water_depth:.2f}')
+                        # time.sleep(duration) <-- While sleeping it doesn't save data so there are missing data because of this. 
+                        # client.publish(dest_topic, exitprog)
 
                 except ValueError:
                     print("Error: Invalid data format")
